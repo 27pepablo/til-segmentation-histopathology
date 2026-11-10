@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Data, intermediate outputs and model weights are never committed
+data/
+work/
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+nnUNet_predicted/
+*.pth
+*.pt
+*.ckpt
+*.tif
+*.tiff
+*.svs
+*.ndpi
+*.nii.gz
+*.geojson
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
