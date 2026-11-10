@@ -1,0 +1,51 @@
+{
+  "source": "Table 3 and Sections 5.1-5.3 of the thesis (docs/thesis_ES.pdf). Dice is computed per case; values are mean and standard deviation over cases.",
+  "experiments": [
+    {
+      "id": "1A",
+      "training_data": "CrowdsourcingDataset-Amgadetal2019",
+      "labels": "original",
+      "evaluation": "TCGA test set (30 tiles)",
+      "dice_mean": 0.604,
+      "dice_std": 0.25,
+      "dice_min": 0.04,
+      "dice_max": 0.87
+    },
+    {
+      "id": "2",
+      "training_data": "CrowdsourcingDataset-Amgadetal2019",
+      "labels": "cellvit",
+      "evaluation": "TCGA test set (30 tiles)",
+      "dice_mean": 0.804,
+      "dice_std": 0.25
+    },
+    {
+      "id": "1A-ext",
+      "training_data": "CrowdsourcingDataset-Amgadetal2019",
+      "labels": "original",
+      "evaluation": "External cohort (87 ROIs)",
+      "dice_mean": 0.580,
+      "dice_std": 0.219
+    },
+    {
+      "id": "2-ext",
+      "training_data": "CrowdsourcingDataset-Amgadetal2019",
+      "labels": "cellvit",
+      "evaluation": "External cohort (87 ROIs)",
+      "dice_mean": 0.681,
+      "dice_std": 0.234,
+      "dice_min": 0.051,
+      "dice_max": 0.969
+    },
+    {
+      "id": "1B",
+      "training_data": "BCSS-WSSS",
+      "labels": "original",
+      "evaluation": "BCSS-WSSS test patches",
+      "dice_mean": 0.622,
+      "dice_std": 0.326,
+      "dice_min": 0.0,
+      "dice_max": 0.92
+    }
+  ]
+}
