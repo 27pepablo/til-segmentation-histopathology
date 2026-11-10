@@ -1,133 +1,146 @@
-# TIL-region segmentation in breast cancer histopathology
+<h1 align="center">TIL-region segmentation in breast cancer histopathology</h1>
 
-[![CI](https://github.com/27pepablo/til-segmentation-histopathology/actions/workflows/ci.yml/badge.svg)](https://github.com/27pepablo/til-segmentation-histopathology/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+<p align="center">
+  <b>Better training labels from cell detections: nnU-Net + CellViT++ on H&E tissue</b>
+</p>
 
-Segmenting regions rich in **tumour-infiltrating lymphocytes (TILs)** in H&E-stained
-breast cancer tissue with **nnU-Net**, and improving the training labels with
-cell-level detections from **CellViT++**.
+<p align="center">
+  <a href="https://github.com/27pepablo/til-segmentation-histopathology/actions/workflows/ci.yml"><img src="https://github.com/27pepablo/til-segmentation-histopathology/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue" alt="Python">
+  <img src="https://img.shields.io/badge/PyTorch-nnU--Net%20v2-ee4c2c" alt="nnU-Net v2">
+  <img src="https://img.shields.io/badge/tests-36%20passing-brightgreen" alt="Tests">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT"></a>
+</p>
 
-Code for my Bachelor's thesis in Biomedical Engineering at Universidad Politécnica
-de Madrid (ETSIT-UPM, 2025), carried out in the Biomedical Image Technologies (BIT)
-group. The full thesis (in Spanish) is in [`docs/thesis_ES.pdf`](docs/thesis_ES.pdf).
+![CellViT++ detections, original annotation and CellViT-derived region on the same TCGA tile](docs/figures/overview_real_tile.png)
 
-![Region labels: original annotation vs. CellViT++-derived](docs/figures/labels_original_vs_cellvit.png)
+<p align="center"><i>
+One TCGA breast cancer tile. A pretrained cell detector finds every lymphocyte (left, green).
+The published region annotation of the same tile is fragmented (centre); the region rebuilt from
+the detected cells is continuous and complete (right). Training on the rebuilt labels raised
+Dice from 0.60 to 0.80.
+</i></p>
 
-*TIL-region labels for the same TCGA tile. Left: original dataset annotation, fragmented
-and incomplete. Right: region derived from CellViT++ lymphocyte detections with the
-method in this repository.*
+## At a glance
 
-## Why
+| | |
+|---|---|
+| **Task** | Outline regions rich in tumour-infiltrating lymphocytes (TILs) in H&E breast cancer tissue |
+| **Idea** | Replace inconsistent region annotations with regions computed from cell-level detections |
+| **Models** | nnU-Net v2 (2D) for region segmentation · CellViT++ (pretrained) for nuclei detection |
+| **Data** | 151 TCGA tiles (BCSS) · BCSS-WSSS patches · 87 ROIs from an independent hospital cohort |
+| **Result** | Dice **0.60 → 0.80** on held-out TCGA tiles · **0.58 → 0.68** on the external cohort |
+| **Stack** | Python · PyTorch · nnU-Net · OpenCV · scikit-learn · pytest · GitHub Actions |
+| **Context** | Bachelor's thesis, Biomedical Engineering, Universidad Politécnica de Madrid (2025) · [full text (Spanish)](docs/thesis_ES.pdf) |
 
-TIL density is a prognostic and predictive biomarker in breast cancer, but
-pathologists score it by eye, which is slow and varies between observers. A model that
-outlines TIL-rich regions makes the measurement objective and repeatable.
+## Contents
+
+- [The problem](#the-problem)
+- [Method](#method)
+- [Results](#results)
+- [Try it in one minute](#try-it-in-one-minute)
+- [Reproduce the experiments](#reproduce-the-experiments)
+- [Repository layout](#repository-layout)
+- [Data](#data)
+- [References, citation, license](#references)
+
+## The problem
+
+TIL density is a prognostic and predictive biomarker in breast cancer. Pathologists
+score it by eye, which is slow and varies between observers; a model that outlines
+TIL-rich regions makes the measurement objective and repeatable.
 
 The obstacle is the labels. Public region annotations of lymphocytic infiltrate are
-inconsistent: the same kind of tissue is outlined tightly in one image and loosely or
-not at all in another, and a segmentation network trained on them inherits that noise.
+inconsistent: similar tissue is outlined tightly in one image and loosely, or not at
+all, in another. A segmentation network trained on them inherits that noise.
 
-## Approach
+## Method
 
-1. **Baseline.** Train nnU-Net (2D) on the original TIL-region annotations of two
-   public datasets.
-2. **Relabel.** Run CellViT++ (pretrained, no fine-tuning) on the same images to
-   detect and classify every nucleus, keep the *inflammatory* cells, and convert those
-   points into regions: local-density filter → rasterise → dilation → morphological
-   closing.
-3. **Retrain.** Train the same nnU-Net configuration on the CellViT-derived regions.
-4. **External test.** Apply both models to tiles from an independent hospital cohort.
+![Method overview](docs/figures/pipeline.png)
 
-```mermaid
-flowchart LR
-    A[H&E tiles<br/>0.25 µm/px] --> B[Original<br/>annotations]
-    A --> C[CellViT++<br/>nuclei detection]
-    C --> D[Inflammatory<br/>centroids]
-    D --> E[Density filter<br/>+ morphology]
-    B --> F[nnU-Net 2D<br/>baseline]
-    E --> G[nnU-Net 2D<br/>CellViT labels]
-    F --> H[Dice on held-out tiles<br/>and external cohort]
-    G --> H
-```
+1. **Baseline.** Train nnU-Net (2D) on the TIL-region annotations as published.
+2. **Relabel.** Run CellViT++ on the same images, without fine-tuning, to detect and
+   classify every nucleus. Keep the *inflammatory* cells and turn those points into
+   regions.
+3. **Retrain.** Train the same nnU-Net configuration on the rebuilt labels.
+4. **External test.** Apply both models to tissue from a different hospital.
 
-The cell-to-region step is the part written for this project; it is small enough to
-show whole. Every stage of it, on synthetic detections:
+### From cells to regions
+
+The step written for this project converts "where is each lymphocyte" into "which area
+is infiltrated". It is short, has no learned parameters, and runs on CPU:
 
 ![Cell-to-region conversion on synthetic data](docs/figures/synthetic_demo.png)
 
-*Produced by [`examples/synthetic_demo.py`](examples/synthetic_demo.py). Isolated
-lymphocytes are dropped by the density filter; aggregates become smooth regions that
-follow concave shapes, which a convex hull (right, with the chosen method outlined in
-orange) cannot do.*
+| Step | What happens | Default |
+|---|---|---|
+| 1 | Take the centroids of the cells CellViT++ classified as inflammatory | |
+| 2 | Keep a cell only if enough other TILs lie within radius *R* | *R* = 100 px, ≥ 0.0003 TILs/px² (about 9 cells) |
+| 3 | Dilate so neighbouring cells merge, then close to fill holes and smooth the outline | 100 px and 120 px elliptical kernels |
+
+Isolated lymphocytes are discarded; aggregates become smooth regions that follow
+concave shapes. The convex-hull alternative (right panel, with the chosen method
+outlined in orange) fills those concavities in, which is why it was dropped.
+
+The figure is generated by [`examples/synthetic_demo.py`](examples/synthetic_demo.py)
+from simulated detections, through the same code path used on real tiles
+([`src/tilseg/til_regions.py`](src/tilseg/til_regions.py)).
 
 ## Results
 
-Dice per image, mean ± standard deviation over the evaluation images
-(thesis, Table 3).
+Dice per image, mean ± standard deviation over the evaluation images.
 
 | Training labels | Trained on | Evaluated on | Dice |
-|---|---|---|---|
-| Original annotations | Crowdsourcing (TCGA), 121 tiles | 30 held-out tiles | 0.60 ± 0.25 |
-| **CellViT++-derived** | Crowdsourcing (TCGA), 121 tiles | 30 held-out tiles | **0.80 ± 0.25** |
-| Original annotations | Crowdsourcing (TCGA) | External cohort, 87 ROIs | 0.58 ± 0.22 |
-| **CellViT++-derived** | Crowdsourcing (TCGA) | External cohort, 87 ROIs | **0.68 ± 0.23** |
-| Original annotations | BCSS-WSSS patches | Held-out patches | 0.62 ± 0.33 |
+|---|---|---|:---:|
+| Original annotations | 121 TCGA tiles | 30 held-out TCGA tiles | 0.60 ± 0.25 |
+| **CellViT++-derived** | 121 TCGA tiles | 30 held-out TCGA tiles | **0.80 ± 0.25** |
+| Original annotations | 121 TCGA tiles | External cohort, 87 ROIs | 0.58 ± 0.22 |
+| **CellViT++-derived** | 121 TCGA tiles | External cohort, 87 ROIs | **0.68 ± 0.23** |
+| Original annotations | BCSS-WSSS patches | Held-out BCSS-WSSS patches | 0.62 ± 0.33 |
 
-![Dice summary](docs/figures/dice_summary.png)
+<p align="center"><img src="docs/figures/dice_summary.png" alt="Dice summary" width="640"></p>
 
-Predictions of the two models on the same TCGA tile (left: trained on original
-annotations; right: trained on CellViT-derived labels):
+**Predictions of the two models on the same tile.** Left: trained on the original
+annotations. Right: trained on CellViT-derived labels.
 
 ![Predictions of both models](docs/figures/predictions_original_vs_cellvit.png)
 
+<details>
+<summary><b>Training curves</b></summary>
+<br>
+
+Both models were trained for 500 epochs with identical settings. With the rebuilt
+labels the loss falls faster and the validation pseudo-Dice ends near 0.95, against
+0.87 for the baseline.
+
+![nnU-Net training curves](docs/figures/training_curves.png)
+
+</details>
+
 ### How to read these numbers
 
-- **Each model is scored against the label definition it was trained on.** The
-  0.60 → 0.80 gain shows that CellViT-derived regions are a more consistent, more
-  learnable target. It does not by itself show they are closer to what a pathologist
-  would draw.
+- **Each model is scored against its own label definition.** In the original
+  experiment scripts the held-out labels of the retrained model are CellViT-derived
+  too. The 0.60 → 0.80 gain therefore shows that the rebuilt regions are a more
+  consistent, more learnable target; it does not by itself show they are closer to
+  what a pathologist would draw.
 - **The external cohort has no pathologist region annotations.** Its reference masks
-  were produced with the same CellViT++ procedure, so that comparison favours the model
-  trained on that label definition. What it does show is that the model reproduces
-  those regions on tissue from a different hospital and scanner.
-- **One train/test split, one training run per model.** Each model was trained once on
-  the full training set (nnU-Net `all` fold) for 500 epochs, so there are no
-  cross-validation or seed-to-seed error bars. The ± values are spread across images,
-  which is large: a few images score near zero in every experiment.
+  come from the same CellViT++ procedure, which favours the model trained on that
+  definition. What the result does show is that the model reproduces those regions on
+  tissue from another hospital and scanner.
+- **One split, one run per model.** Each model was trained once on the whole training
+  set (nnU-Net `all` fold), so there are no cross-validation or seed-to-seed error
+  bars. The ± values are spread across images, and it is large: a few images score
+  near zero in every experiment.
 - **BCSS-WSSS masks are pseudo-labels** from a weakly supervised model, not manual
   annotations.
 
-The natural next step is a reader study: pathologist-drawn regions on a subset of the
+The natural next step is a reader study: pathologist-drawn regions on part of the
 external cohort, to measure both label definitions against the same expert reference.
 
-## Repository layout
+## Try it in one minute
 
-```
-src/tilseg/
-    masks.py            multi-class dataset masks -> binary TIL masks
-    nnunet_dataset.py   nnU-Net v2 raw dataset (naming, 80/20 split, dataset.json)
-    cellvit_io.py       CellViT++ GeoJSON reader, file-list writer
-    til_regions.py      cell centroids -> TIL-region masks  (core contribution)
-    metrics.py          Dice / IoU / precision / recall per image, summaries
-    viz.py              contour overlays, side-by-side panels, box plots
-    cli.py              `tilseg` command-line interface
-scripts/
-    train_nnunet.sh         plan + preprocess + train + predict + evaluate
-    run_cellvit.sh          PNG -> pyramidal TIFF -> CellViT++ inference
-    nnUNetTrainer_500ep.py  500-epoch nnU-Net trainer
-examples/
-    synthetic_demo.py   runs the cell-to-region step without any dataset
-    plot_results.py     draws the results figure from docs/results.json
-tests/                  36 unit and end-to-end tests
-docs/
-    reproduce.md        step-by-step reproduction of the thesis experiments
-    thesis_ES.pdf       full thesis (Spanish)
-```
-
-## Quick start
-
-No dataset or GPU is needed to run the core method:
+No dataset and no GPU are needed to run the core method.
 
 ```bash
 git clone https://github.com/27pepablo/til-segmentation-histopathology.git
@@ -135,7 +148,7 @@ cd til-segmentation-histopathology
 pip install -e ".[dev]"
 
 pytest                              # 36 tests
-python examples/synthetic_demo.py   # regenerates docs/figures/synthetic_demo.png
+python examples/synthetic_demo.py   # regenerates the cell-to-region figure
 ```
 
 From Python:
@@ -143,16 +156,31 @@ From Python:
 ```python
 from tilseg import cellvit_io, til_regions
 
-tils = cellvit_io.load_centroids("slide_cell_detection.geojson")   # (N, 2) x, y
+tils = cellvit_io.load_centroids("slide_cell_detection.geojson")   # (N, 2) array of x, y
 mask = til_regions.region_mask(tils, shape=(2048, 2048))           # uint8, 1 = TIL region
 print(f"{100 * til_regions.til_area_fraction(mask):.1f}% of the tile is TIL-rich")
 ```
 
-## Reproducing the experiments
+From the command line:
+
+```text
+tilseg binarize          multi-class dataset masks -> binary TIL masks
+tilseg build-dataset     create an nnU-Net v2 raw dataset (80/20 split)
+tilseg cellvit-filelist  CSV file list for CellViT++
+tilseg til-masks         CellViT++ detections -> TIL-region masks
+tilseg replace-labels    swap dataset labels for CellViT-derived masks
+tilseg evaluate          Dice / IoU between predicted and reference masks
+tilseg overlay           draw mask contours on the images
+```
+
+## Reproduce the experiments
 
 The full pipeline needs the public datasets, an nnU-Net v2 environment, a CellViT++
-environment and a GPU. [`docs/reproduce.md`](docs/reproduce.md) has every command; in
-short:
+environment and a GPU. Each training run took 6–7 hours on a 40 GB GPU.
+**[`docs/reproduce.md`](docs/reproduce.md)** explains every step.
+
+<details>
+<summary><b>The whole pipeline in four steps</b></summary>
 
 ```bash
 # 1. Binary TIL masks from the dataset annotations
@@ -173,22 +201,56 @@ tilseg replace-labels --dataset "$nnUNet_raw/Dataset444_TILsCellViT" --labels wo
 scripts/train_nnunet.sh 444
 ```
 
+</details>
+
+The results above come from the original thesis runs on the research group's server.
+This repository is a tested rewrite of those scripts; the trainings have not been
+repeated from it, because the data and models stay on that server.
+
+## Repository layout
+
+```text
+├── src/tilseg/               Python package
+│   ├── masks.py                dataset class maps -> binary TIL masks
+│   ├── nnunet_dataset.py       nnU-Net v2 dataset: naming, split, dataset.json
+│   ├── cellvit_io.py           CellViT++ GeoJSON reader, file-list writer
+│   ├── til_regions.py          cell centroids -> TIL regions (core of the method)
+│   ├── metrics.py              Dice, IoU, precision, recall per image
+│   ├── viz.py                  contour overlays, comparison panels, box plots
+│   └── cli.py                  the `tilseg` command
+├── scripts/
+│   ├── train_nnunet.sh         plan, preprocess, train, predict, evaluate
+│   ├── run_cellvit.sh          PNG -> pyramidal TIFF -> CellViT++ inference
+│   └── nnUNetTrainer_500ep.py  500-epoch nnU-Net trainer
+├── examples/
+│   ├── synthetic_demo.py       the method on simulated detections
+│   ├── draw_pipeline.py        method overview diagram
+│   └── plot_results.py         results figure from docs/results.json
+├── tests/                    36 unit and end-to-end tests
+├── docs/
+│   ├── reproduce.md            step-by-step reproduction guide
+│   ├── results.json            reported metrics, machine-readable
+│   ├── figures/                figures used in this README
+│   └── thesis_ES.pdf           full thesis (Spanish, 74 pages)
+└── .github/workflows/ci.yml  lint + tests + demo on every push
+```
+
 ## Data
 
 No images, masks or model weights are distributed here.
 
-| Dataset | Use | Source |
+| Dataset | Contents | Source |
 |---|---|---|
 | CrowdsourcingDataset-Amgadetal2019 (BCSS) | 151 TCGA breast ROIs at 0.25 µm/px with region annotations | [CancerDataScience/CrowdsourcingDataset-Amgadetal2019](https://github.com/CancerDataScience/CrowdsourcingDataset-Amgadetal2019) |
-| BCSS-WSSS | 224×224 patches with pseudo-label masks; the 1,112 patches containing lymphocyte regions were used | [ChuHan89/WSSS-Tissue](https://github.com/ChuHan89/WSSS-Tissue) |
+| BCSS-WSSS | 224×224 px patches with pseudo-label masks; the 1,112 patches containing lymphocyte regions were used | [ChuHan89/WSSS-Tissue](https://github.com/ChuHan89/WSSS-Tissue) |
 | External cohort | 87 ROIs of 2048×2048 px from 15 H&E slides, Hospital Universitario Ramón y Cajal | Clinical data, not public |
 
-## Built on
+## References
 
-- **nnU-Net v2**: Isensee et al., *Nature Methods* 2021. [MIC-DKFZ/nnUNet](https://github.com/MIC-DKFZ/nnUNet)
-- **CellViT / CellViT++**: Hörst et al., *Medical Image Analysis* 2024. [TIO-IKIM/CellViT-plus-plus](https://github.com/TIO-IKIM/CellViT-plus-plus)
-- **BCSS**: Amgad et al., *Bioinformatics* 2019.
-- **WSSS-Tissue**: Han et al., *Medical Image Analysis* 2022.
+- **nnU-Net**: Isensee et al., *Nature Methods*, 2021 · [MIC-DKFZ/nnUNet](https://github.com/MIC-DKFZ/nnUNet)
+- **CellViT / CellViT++**: Hörst et al., *Medical Image Analysis*, 2024 · [TIO-IKIM/CellViT-plus-plus](https://github.com/TIO-IKIM/CellViT-plus-plus)
+- **BCSS**: Amgad et al., *Bioinformatics*, 2019
+- **WSSS-Tissue**: Han et al., *Medical Image Analysis*, 2022
 
 ## Citation
 
@@ -204,14 +266,14 @@ No images, masks or model weights are distributed here.
 }
 ```
 
+## License
+
+Code: [MIT](LICENSE). The thesis document and its figures remain © the author. The
+histology shown in this README comes from TCGA public data.
+
 ## Acknowledgements
 
 Supervised by Juan Martínez-Aedo Castro, with Irene Carretero Barrio as co-supervisor
 and María Jesús Ledesma Carbayo as academic tutor, at the Biomedical Image Technologies
-group (ETSIT-UPM). The external cohort and the clinical context come from
-Hospital Universitario Ramón y Cajal, Madrid.
-
-## License
-
-Code: [MIT](LICENSE). The thesis document and its figures remain © the author; the
-histology shown in the figures comes from TCGA public data.
+group (ETSIT-UPM). The external cohort and the clinical context come from Hospital
+Universitario Ramón y Cajal, Madrid.
