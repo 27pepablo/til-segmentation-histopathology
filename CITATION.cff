@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the thesis it accompanies."
+title: "TIL-region segmentation in breast cancer histopathology with nnU-Net and CellViT++"
+type: software
+authors:
+  - family-names: "Pérez Gómez"
+    given-names: "Pablo"
+repository-code: "https://github.com/27pepablo/til-segmentation-histopathology"
+license: MIT
+version: 1.0.0
+preferred-citation:
+  type: thesis
+  thesis-type: "Bachelor's thesis"
+  title: "Implementación de algoritmos para la segmentación de regiones con linfocitos infiltrantes tumorales en imágenes histopatológicas de cáncer de mama mediante técnicas de aprendizaje profundo"
+  authors:
+    - family-names: "Pérez Gómez"
+      given-names: "Pablo"
+  institution:
+    name: "Universidad Politécnica de Madrid, ETSI de Telecomunicación"
+  year: 2025
